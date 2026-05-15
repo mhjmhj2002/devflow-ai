@@ -1,7 +1,16 @@
 from datetime import datetime
 
 
-def generate_markdown_plan(issue_title, issue_number, context, plan):
+def generate_markdown_plan(issue_title, issue_number, project_context, service_context, plan):
+
+    # service_context may be a ServiceContext or a minimal ProjectContext fallback
+    repo = getattr(project_context, "repository", "unknown")
+    svc_name = getattr(service_context, "name", "unknown")
+    language = getattr(service_context, "language", None) or getattr(project_context, "language", "unknown")
+    framework = getattr(service_context, "framework", None) or getattr(project_context, "framework", "unknown")
+    build_tool = getattr(service_context, "build_tool", None) or getattr(project_context, "build_tool", "unknown")
+    java_version = getattr(service_context, "java_version", None) or getattr(project_context, "java_version", "")
+    dependencies = getattr(service_context, "dependencies", []) or getattr(project_context, "dependencies", [])
 
     markdown = f"""
 # Development Plan - Issue #{issue_number}
@@ -22,11 +31,12 @@ def generate_markdown_plan(issue_title, issue_number, context, plan):
 
 | Property | Value |
 |---|---|
-| Repository | {context.repository} |
-| Language | {context.language} |
-| Framework | {context.framework} |
-| Build Tool | {context.build_tool} |
-| Java Version | {context.java_version} |
+| Repository | {repo} |
+| Service | {svc_name} |
+| Language | {language} |
+| Framework | {framework} |
+| Build Tool | {build_tool} |
+| Java Version | {java_version} |
 
 ---
 
@@ -34,7 +44,7 @@ def generate_markdown_plan(issue_title, issue_number, context, plan):
 
 """
 
-    for dependency in context.dependencies:
+    for dependency in dependencies:
         markdown += f"- {dependency}\n"
 
     markdown += "\n---\n"
