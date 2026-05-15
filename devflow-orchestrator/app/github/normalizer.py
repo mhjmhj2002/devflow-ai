@@ -35,4 +35,18 @@ def normalize_github_event(event: str, payload: dict):
         "service": service
     }
 
+    # include comment fields for issue_comment events so downstream validators
+    # that expect either raw or normalized shapes can access the comment body/user/id
+    if event == "issue_comment":
+        comment = payload.get("comment") or {}
+        if isinstance(comment, dict):
+            normalized["comment_body"] = comment.get("body")
+            normalized["comment_user"] = (comment.get("user") or {}).get("login")
+            normalized["comment_id"] = comment.get("id")
+        else:
+            # support already-normalized shape where fields may be at top-level
+            normalized["comment_body"] = payload.get("comment_body")
+            normalized["comment_user"] = payload.get("comment_user")
+            normalized["comment_id"] = payload.get("comment_id")
+
     return normalized
