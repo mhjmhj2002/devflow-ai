@@ -2,6 +2,9 @@
 
 from app.core.logger import logger
 from app.events.contracts.issue_events import IssueOpenedEvent, IssueCommentCreatedEvent
+from app.github.extractors.issue_comment_extractor import extract_issue_comment
+from app.github.extractors.issues_extractor import extract_issues_event
+from app.github.extractors.pull_request_extractor import extract_pull_request
 
 
 class EventValidator:
@@ -23,48 +26,83 @@ class EventValidator:
             repository = payload.get("repository")
             issue = payload.get("issue")
 
-            # handle issue_comment (GitHub raw payload):
-            # payload: { repository: {...}, issue: {...}, comment: {...} }
+            # handle event types using extractors to normalize payloads
             if event_name == "issue_comment":
-                comment = payload.get("comment")
-                # normalized shape possibility: repository is string, issue_number, comment_body
-                if isinstance(payload.get("repository"), str) and (payload.get("issue_number") or payload.get("comment_body")):
-                    repository_safe = {"name": payload.get("repository")}
-                    comment_safe = {
-                        "id": payload.get("comment_id") or 0,
-                        "body": payload.get("comment_body"),
-                        "user": {"login": payload.get("comment_user") or ""}
-                    }
+                data = extract_issue_comment(payload)
 
-                    event = IssueCommentCreatedEvent(
-                        repository=repository_safe,
-                        issue_number=payload.get("issue_number"),
-                        comment=comment_safe,
-                        service=payload.get("service")
-                    )
+                repo_name = data.get("repository")
+                if not repo_name:
+                    return None, "missing repository"
 
-                    return event, None
+                repository_safe = {"name": repo_name}
 
-                # raw payload case
-                if not repository or not comment:
-                    return None, "missing repository or comment"
+                issue_number = data.get("issue_number")
 
-                issue_number = payload.get("issue", {}).get("number") or payload.get("issue_number")
-
-                comment_safe = dict(comment) if isinstance(comment, dict) else comment
-                # ensure body and user exist
-                comment_safe = comment_safe or {}
-                comment_safe["body"] = comment_safe.get("body") or ""
-                user = comment_safe.get("user") or {"login": ""}
-                comment_safe["user"] = user
-
-                repository_safe = dict(repository) if isinstance(repository, dict) else repository
+                comment_safe = {
+                    "id": data.get("comment_id") or 0,
+                    "body": data.get("comment_body") or "",
+                    "user": {"login": data.get("comment_user") or ""}
+                }
 
                 event = IssueCommentCreatedEvent(
                     repository=repository_safe,
                     issue_number=issue_number,
                     comment=comment_safe,
-                    service=None
+                    service=payload.get("service")
+                )
+
+
+                return event, None
+
+            if event_name == "issues":
+                # normalize issues payloads
+                data = extract_issues_event(payload)
+
+                repo_name = data.get("repository")
+                if not repo_name:
+                    return None, "missing repository"
+
+                repository_safe = {"name": repo_name}
+
+                issue_safe = {
+                    "number": data.get("issue_number"),
+                    "title": data.get("issue_title"),
+                    "body": data.get("issue_body"),
+                    "labels": data.get("labels") or []
+                }
+
+                service = payload.get("service")
+
+                event = IssueOpenedEvent(
+                    repository=repository_safe,
+                    issue=issue_safe,
+                    service=service
+                )
+
+                return event, None
+
+            if event_name == "pull_request":
+                data = extract_pull_request(payload)
+
+                repo_name = data.get("repository")
+                if not repo_name:
+                    return None, "missing repository"
+
+                # map pull request into IssueOpenedEvent-like structure for now
+                repository_safe = {"name": repo_name}
+
+                issue_safe = {
+                    "number": data.get("pr_number"),
+                    "title": data.get("pr_title"),
+                    "labels": data.get("labels") or []
+                }
+
+                service = payload.get("service")
+
+                event = IssueOpenedEvent(
+                    repository=repository_safe,
+                    issue=issue_safe,
+                    service=service
                 )
 
                 return event, None
