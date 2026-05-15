@@ -1,0 +1,4 @@
+DevFlow AI generated artifacts
+Repository: devflow-ai
+Issue: 22
+Comment: DevFlow: code generation started (workflow result: {'repository': 'devflow-ai', 'issue_number': 22, 'branch': 'devflow/issue-22-approve', 'generated': True})

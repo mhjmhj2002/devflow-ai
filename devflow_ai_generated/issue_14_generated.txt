@@ -1,4 +1,23 @@
 DevFlow AI generated artifacts
 Repository: devflow-ai
 Issue: 14
-Comment: DevFlow: code generation started (workflow result: {'repository': 'devflow-ai', 'issue_number': 14, 'branch': 'devflow/issue-14-approve', 'generated': True})
+Comment: 
+# Development Plan - Issue #14
+
+## Issue
+
+Create POST /users endpoint
+
+---
+
+## Generated At
+
+2026-05-15T21:20:50.752050 UTC
+
+---
+
+# Project Context
+
+| Property | Value |
+|---|---|
+| Repository | devf
