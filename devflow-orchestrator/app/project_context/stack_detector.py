@@ -18,6 +18,7 @@ def file_contains(path: str, keyword: str):
 
 def detect_stack(files: list[str], repository: str):
 
+    # Build a lightweight ProjectContext (legacy) and return as dict
     context = ProjectContext(repository=repository)
 
     # =========================
@@ -93,4 +94,12 @@ def detect_stack(files: list[str], repository: str):
 
     context.source_directories = src_dirs[:20]
 
-    return context
+    # Return a dict suitable to update a ServiceContext via model_copy(update=...)
+    return {
+        "language": context.language,
+        "framework": context.framework,
+        "build_tool": context.build_tool,
+        "java_version": context.java_version,
+        "dependencies": context.dependencies,
+        "entrypoints": context.source_directories[:10]
+    }

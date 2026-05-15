@@ -20,7 +20,10 @@ def generate_plan(
     print("\n========== PROMPT ==========\n")
     print(prompt)
 
+    # In the current MVP we only build the prompt for the LLM. Return the prompt for callers
+    # so that the execution layer can send it to the model and persist the result.
     return {
         "status": "planning",
-        "message": "planner executed"
+        "message": "planner executed",
+        "prompt": prompt
     }

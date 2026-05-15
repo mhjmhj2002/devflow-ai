@@ -1,5 +1,8 @@
 def build_planning_prompt(issue_title: str, context):
 
+    # context is service-aware (ServiceContext) and may expose entrypoints
+    source_dirs = getattr(context, "entrypoints", None) or getattr(context, "source_directories", [])
+
     return f"""
 You are an AI software architect.
 
@@ -11,16 +14,16 @@ ISSUE:
 PROJECT CONTEXT:
 
 Language:
-{context.language}
+{getattr(context, 'language', 'unknown')}
 
 Framework:
-{context.framework}
+{getattr(context, 'framework', 'unknown')}
 
 Build Tool:
-{context.build_tool}
+{getattr(context, 'build_tool', 'unknown')}
 
-Source Directories:
-{context.source_directories}
+Source Directories / Entrypoints:
+{source_dirs}
 
 Generate a concise implementation plan in JSON format.
 

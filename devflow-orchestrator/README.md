@@ -108,9 +108,33 @@ export PYTHONPATH=$(pwd)
 ```
 
 ### 4) Rodar o servidor
+
+Existem duas formas confiáveis de executar o servidor localmente. A primeira é
+usar o modulo do Python (recomendado em terminais onde o `uvicorn` não esteja no PATH,
+como o terminal do IntelliJ quando não ativa automaticamente o virtualenv):
+
 ```sh
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
+
+Alternativamente há um helper script no repositório que detecta/usa o Python do
+virtualenv do projeto (procura `.venv`, `venv` ou `env`) e executa o uvicorn com ele:
+
+```sh
+# tornar executável (uma vez):
+chmod +x scripts/run_uvicorn.sh
+# rodar (porta padrão 8000):
+./scripts/run_uvicorn.sh
+# ou porta customizada:
+./scripts/run_uvicorn.sh --port 9000
+# apenas mostrar o comando resolvido sem executar:
+./scripts/run_uvicorn.sh --dry-run
+```
+
+Se preferir usar diretamente o comando `uvicorn ...`, certifique-se de que o
+IntelliJ esteja usando/ativando o mesmo virtualenv que você usou para instalar
+as dependências. No IntelliJ isso é configurado em Settings > Tools > Terminal
+ou ajustando o Python Interpreter do projeto para apontar para a virtualenv.
 
 ## Endpoints úteis
 - Healthcheck: `GET http://localhost:8000/health`
@@ -182,6 +206,4 @@ Se quiser suporte para parsing de `Target Service` no corpo da issue, posso impl
 3. Implementar mocks para OpenAI e GitHub em modo `development`.
 4. Escrever 6-8 testes unitários cobrindo `normalizer`, `stack_detector` e `planning_agent`.
 5. Melhorar o template de Markdown para comentários.
-
-Se preferir, posso gerar automaticamente o `requirements.txt` e um `run-local.sh` — diga qual ação quer que eu execute em seguida.
 

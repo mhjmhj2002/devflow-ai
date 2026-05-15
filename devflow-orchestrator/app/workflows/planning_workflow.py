@@ -54,29 +54,55 @@ async def start_planning_workflow(event: dict):
             f"Repository/Service not registered: {target}"
         )
 
+        # if the event explicitly targeted a service and it's not mapped -> error
+        if event.get("service"):
+            return {
+                "status": "error",
+                "reason": f"repository/service not mapped: {target}"
+            }
+
+        # if no service label was provided, prefer to ignore the event instead of failing
         return {
-            "status": "error",
-            "reason": f"repository/service not mapped: {target}"
+            "status": "ignored",
+            "reason": "missing service mapping"
         }
 
     # =========================
-    # BUILD CONTEXT
+    # BUILD CONTEXT (service-aware)
     # =========================
 
-    context = build_project_context(
+    project_context = build_project_context(
         repo_path=repo_path,
         repository=repository
     )
 
-    logger.info(f"Project context: {context}")
+    logger.info(f"Project context: {project_context}")
+
+    # choose target service (from event labels) or fallback to repository
+    target = event.get("service") or repository
+
+    # find matching service context
+    service_context = None
+    for s in project_context.services:
+        if s.name == target or s.name in target:
+            service_context = s
+            break
+
+    # fallback: first service or a minimal context built from project root
+    if not service_context and project_context.services:
+        service_context = project_context.services[0]
+
+    if not service_context:
+        # minimal fallback
+        service_context = project_context
 
     # =========================
-    # GENERATE PLAN
+    # GENERATE PLAN (per-service)
     # =========================
 
     plan = await generate_plan(
         issue_title=issue_title,
-        context=context
+        context=service_context
     )
 
     logger.info(f"Generated plan:\n{plan}")
@@ -88,7 +114,8 @@ async def start_planning_workflow(event: dict):
     markdown = generate_markdown_plan(
         issue_title=issue_title,
         issue_number=issue_number,
-        context=context,
+        project_context=project_context,
+        service_context=service_context,
         plan=plan_json
     )
 
@@ -97,11 +124,20 @@ async def start_planning_workflow(event: dict):
         markdown
     )
 
-    post_github_comment(
-        repository=repository,
-        issue_number=issue_number,
-        body=markdown
-    )
+    # attempt to post GitHub comment; don't let failing comment break the workflow
+    try:
+        comment_result = post_github_comment(
+            repository=repository,
+            issue_number=issue_number,
+            body=markdown
+        )
+
+        if isinstance(comment_result, dict) and comment_result.get("status") != "ok":
+            logger.warning(f"Posting GitHub comment returned non-ok status: {comment_result}")
+
+    except Exception as e:
+        # should not happen because post_github_comment handles exceptions, but be extra safe
+        logger.exception("Unexpected error while posting GitHub comment")
 
     return {
         "status": "planning_completed",
