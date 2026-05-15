@@ -1,23 +1,4 @@
 DevFlow AI generated artifacts
 Repository: devflow-ai
 Issue: 22
-Comment: 
-# Development Plan - Issue #22
-
-## Issue
-
-Create POST /users endpoint
-
----
-
-## Generated At
-
-2026-05-15T21:22:00.788049 UTC
-
----
-
-# Project Context
-
-| Property | Value |
-|---|---|
-| Repository | devf
+Comment: /approve
