@@ -32,7 +32,7 @@ def get_default_branch(repository: str):
         return None
 
 
-def create_pull_request(repository: str, head: str, base: str = None, title: str = None, body: str = None):
+def create_pull_request(repository: str, head: str, base: str = None, title: str = None, body: str = None, requested_reviewers: list | None = None):
     """Create a pull request on GitHub. Returns dict with status and result/error."""
 
     if not GITHUB_TOKEN or not GITHUB_OWNER:
@@ -54,6 +54,11 @@ def create_pull_request(repository: str, head: str, base: str = None, title: str
         "body": body or "AI generated changes by DevFlow"
     }
 
+    # include requested reviewers when provided
+    if requested_reviewers:
+        # GitHub API expects a list under 'requested_reviewers'
+        payload["requested_reviewers"] = requested_reviewers
+
     try:
         resp = requests.post(url, headers=_headers(), json=payload, timeout=10)
         resp.raise_for_status()
@@ -67,4 +72,33 @@ def create_pull_request(repository: str, head: str, base: str = None, title: str
 
         logger.error(f"Failed to create PR for {repository}: {e} (status={status_code})")
         return {"status": "error", "reason": str(e), "status_code": status_code}
+
+
+def update_pull_request(repository: str, pr_number: int, body: str = None, title: str = None):
+    """Patch an existing PR to update title/body."""
+    if not GITHUB_TOKEN or not GITHUB_OWNER:
+        logger.warning("GitHub credentials not configured: skipping PR update")
+        return {"status": "skipped", "reason": "missing credentials"}
+
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{repository}/pulls/{pr_number}"
+    payload = {}
+    if body is not None:
+        payload["body"] = body
+    if title is not None:
+        payload["title"] = title
+
+    try:
+        resp = requests.patch(url, headers=_headers(), json=payload, timeout=10)
+        resp.raise_for_status()
+        return {"status": "ok", "result": resp.json()}
+    except RequestException as e:
+        status_code = None
+        try:
+            status_code = e.response.status_code if hasattr(e, "response") and e.response is not None else None
+        except Exception:
+            status_code = None
+
+        logger.error(f"Failed to update PR #{pr_number} for {repository}: {e} (status={status_code})")
+        return {"status": "error", "reason": str(e), "status_code": status_code}
+
 

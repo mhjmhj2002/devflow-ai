@@ -19,6 +19,11 @@ import hashlib
 import re
 from app.github.pr_creator import create_pull_request
 from app.github.github_commenter import post_github_comment
+from app.agents.reviewer_agent import review_pull_request
+import os
+import subprocess
+from app.github.pr_creator import update_pull_request
+from app.agents.reviewer_agent import fetch_pr_files
 
 
 def _slugify(text: str) -> str:
@@ -68,37 +73,148 @@ def start_codegen_workflow(payload: Dict[str, Any]):
 
     gen_file.write_text(content)
 
-    # attempt to commit and push if .git exists
-    if (target / ".git").exists():
-        code, out, err = git.checkout_new_branch(str(target), branch)
-        if code != 0:
-            logger.warning(f"Failed creating branch: {out} {err}")
-        else:
-            msg = f"chore(devflow): ai generated changes for issue {issue_number}"
-            code2, out2, err2 = git.add_commit_push(str(target), msg, branch)
-            if code2 != 0:
-                logger.warning(f"Failed add/commit/push: {out2} {err2}")
-            else:
-                # attempt to create pull request if push succeeded
-                try:
-                    pr = create_pull_request(repository=repository, head=branch)
-                    logger.info(f"PR creation result: {pr}")
+    # environment flags
+    DRY_RUN = os.getenv("DEVFLOW_DRY_RUN", "false").lower() in ("1", "true", "yes")
 
-                    # if PR created successfully, comment on the originating issue with the PR link
-                    if isinstance(pr, dict) and pr.get("status") == "ok":
-                        pr_result = pr.get("result") or {}
-                        pr_url = pr_result.get("html_url") or pr_result.get("url")
-                        if pr_url:
-                            try:
-                                post_github_comment(
-                                    repository=repository,
-                                    issue_number=issue_number,
-                                    body=f"DevFlow: created Pull Request for generated changes: {pr_url}"
-                                )
-                            except Exception:
-                                logger.exception("Failed to post PR link comment")
-                except Exception:
-                    logger.exception("Failed to create PR")
+    # helper: run maven tests if pom.xml exists
+    def run_maven_tests(path: Path) -> bool:
+        pom = path / "pom.xml"
+        if not pom.exists():
+            return True
+        if DRY_RUN:
+            logger.info("DRY RUN: would run 'mvn test' here")
+            return True
+        try:
+            proc = subprocess.run(["mvn", "-q", "test"], cwd=str(path), capture_output=True, text=True)
+            if proc.returncode != 0:
+                logger.error(f"Maven tests failed: {proc.stdout}\n{proc.stderr}")
+                return False
+            logger.info("Maven tests passed")
+            return True
+        except FileNotFoundError:
+            logger.warning("Maven not found on PATH; skipping maven tests")
+            return True
+
+    if not run_maven_tests(target):
+        raise RuntimeError("Validation failed: maven tests did not pass")
+
+    # attempt to commit and push if .git exists
+    pr_result = None
+    if (target / ".git").exists():
+        if DRY_RUN:
+            logger.info(f"DRY RUN: would create branch {branch} and commit changes in {target}")
+        else:
+            code, out, err = git.checkout_new_branch(str(target), branch)
+            if code != 0:
+                logger.warning(f"Failed creating branch: {out} {err}")
+            else:
+                msg = f"chore(devflow): ai generated changes for issue {issue_number}"
+                code2, out2, err2 = git.add_commit_push(str(target), msg, branch)
+                if code2 != 0:
+                    logger.warning(f"Failed add/commit/push: {out2} {err2}")
+                else:
+                    # attempt to create pull request if push succeeded (and not dry-run)
+                    if DRY_RUN:
+                        logger.info(f"DRY RUN: would create PR for branch {branch}")
+                    else:
+                                                    try:
+                                                        # compute requested reviewers from CODEOWNERS if present
+                                                        def parse_codeowners(path: Path):
+                                                            candidates = []
+                                                            locations = [path / ".github" / "CODEOWNERS", path / "CODEOWNERS"]
+                                                            for loc in locations:
+                                                                if loc.exists():
+                                                                    for line in loc.read_text().splitlines():
+                                                                        line = line.strip()
+                                                                        if not line or line.startswith("#"):
+                                                                            continue
+                                                                        parts = line.split()
+                                                                        if len(parts) >= 2:
+                                                                            owners = parts[1:]
+                                                                            for o in owners:
+                                                                                if o.startswith("@"):
+                                                                                    candidates.append(o.lstrip("@"))
+                                                                                else:
+                                                                                    candidates.append(o)
+                                                                    break
+                                                            # dedupe
+                                                            return list(dict.fromkeys(candidates))
+
+                                                        reviewers = parse_codeowners(target)
+                                                        if not reviewers:
+                                                            # fallback to owner from env
+                                                            reviewers = [os.getenv("GITHUB_OWNER")]
+
+                                                        pr = create_pull_request(repository=repository, head=branch, requested_reviewers=reviewers)
+                                                        pr_result = pr
+                                                        logger.info(f"PR creation result: {pr}")
+                                                    except Exception:
+                                                        logger.exception("Failed to create PR")
+
+    # if PR was created successfully, post link and run reviewer agent
+    if isinstance(pr_result, dict) and pr_result.get("status") == "ok":
+        pr_res = pr_result.get("result") or {}
+        pr_url = pr_res.get("html_url") or pr_res.get("url")
+        if pr_url:
+            try:
+                resp = post_github_comment(
+                    repository=repository,
+                    issue_number=issue_number,
+                    body=f"DevFlow: created Pull Request for generated changes: {pr_url}"
+                )
+                # if posting to original issue failed (404), fallback to PR number
+                if isinstance(resp, dict) and resp.get("status") == "error" and resp.get("status_code") == 404:
+                    pr_num = pr_res.get("number")
+                    post_github_comment(
+                        repository=repository,
+                        issue_number=pr_num,
+                        body=f"DevFlow: created Pull Request for generated changes: {pr_url} (original issue {issue_number} not found)"
+                    )
+            except Exception:
+                logger.exception("Failed to post PR link comment")
+
+        # trigger reviewer agent to perform an automated review and post results
+        try:
+            if pr_res and pr_res.get("number"):
+                review = review_pull_request(repository=repository, pr_number=pr_res.get("number"))
+                if review:
+                    # post review result as comment on PR
+                    post_github_comment(
+                        repository=repository,
+                        issue_number=pr_res.get("number"),
+                        body=f"DevFlow automated review:\n\n{review}"
+                    )
+        except Exception:
+            logger.exception("Reviewer agent failed or couldn't post review")
+
+        # Enrich PR body with list of files changed and a checklist
+        try:
+            files = fetch_pr_files(repository, pr_res.get("number"))
+            if files:
+                filenames = [f.get("filename") for f in files]
+                files_md = "\n".join([f"- `{n}`" for n in filenames])
+                checklist = """
+### AI Generated Changes
+
+#### Files changed
+%s
+
+#### Validation checklist
+- [ ] Build passes locally (Maven)
+- [ ] Tests pass
+- [ ] No obvious security issues
+- [ ] Naming and API contracts respected
+- [ ] Add/Update unit tests where appropriate
+
+#### Review instructions
+Please review the changed files, run the project tests locally and approve the PR when satisfied.
+""" % files_md
+
+                update_pull_request(repository, pr_res.get("number"), body=checklist)
+        except Exception:
+            logger.exception("Failed to enrich PR body")
+        except Exception:
+            logger.exception("Reviewer agent failed or couldn't post review")
 
     logger.info(f"Codegen workflow finished for {repository}#{issue_number} branch={branch}")
     return {"repository": repository, "issue_number": issue_number, "branch": branch, "generated": True}

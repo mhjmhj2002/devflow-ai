@@ -8,6 +8,7 @@ from typing import Any, Dict
 from app.core.logger import logger
 from app.github.github_commenter import post_github_comment
 from app.codegen.codegen_orchestrator import start_codegen_workflow
+import os
 
 
 APPROVAL_COMMANDS = ["/approve", "/devflow approve", "approve"]
@@ -49,13 +50,16 @@ async def start_comment_workflow(event: Dict[str, Any]):
             "comment": comment,
         })
 
-        # try to notify the issue that generation started
+        # try to notify the issue that generation started (skip in dry-run)
         try:
-            post_github_comment(
-                repository=repo_name,
-                issue_number=issue_number,
-                body=f"DevFlow: code generation started (workflow result: {result})"
-            )
+            if os.getenv("DEVFLOW_DRY_RUN", "false").lower() not in ("1", "true", "yes"):
+                post_github_comment(
+                    repository=repo_name,
+                    issue_number=issue_number,
+                    body=f"DevFlow: code generation started (workflow result: {result})"
+                )
+            else:
+                logger.info("DRY RUN: skipping post_github_comment for generation start")
         except Exception:
             logger.exception("Failed to post start comment")
 
