@@ -77,10 +77,19 @@ def review_pull_request(repository: str, pr_number: int) -> Optional[str]:
     # if OpenAI key missing, skip
     try:
         review = None
-        # generate_text is async; call synchronously via event loop if necessary
+        # generate_text is async; run it in a background thread to avoid
+        # "asyncio.run() cannot be called from a running event loop" when
+        # this function is invoked from an existing event loop (e.g. uvicorn).
         import asyncio
+        import concurrent.futures
 
-        review = asyncio.run(generate_text(prompt))
+        def _run():
+            return asyncio.run(generate_text(prompt))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(_run)
+            review = fut.result()
+
         return review
     except Exception as e:
         logger.exception(f"LLM review failed: {e}")
